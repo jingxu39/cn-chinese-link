@@ -1,0 +1,9 @@
+# CN Chinese Link (中国缘)
+# Streamlit Cloud 部署配置
+
+[theme]
+primaryColor = "#667eea"
+backgroundColor = "#fdfbf7"
+secondaryBackgroundColor = "#f4f7f6"
+textColor = "#2c3e50"
+font = "sans serif"
