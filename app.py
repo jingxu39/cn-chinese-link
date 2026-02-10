@@ -94,8 +94,8 @@ ROLES = {
         "description": "年轻活泼的朋友",
         "description_en": "A young and energetic friend",
         "personality": "活泼、幽默、爱分享",
-        "scenes": ["周末约饭", "吐槽工作", "聊网络热梗"],
-        "scenes_en": ["Weekend Hangout", "Work Complaints", "Internet Trends"],
+        "scenes": ["周末约饭", "吐槽工作", "聊网络热梗", "自由聊天"],
+        "scenes_en": ["Weekend Hangout", "Work Complaints", "Internet Trends", "Free Chat"],
         "gender": "male",
         "voice": "sambert-zhijia-emo-v1",
         "voice_style": "casual"
@@ -254,20 +254,34 @@ def register_user(email, password, nickname=None):
 
 def login_user(email, password):
     """用户登录"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, password_hash, nickname, hsk_level FROM users WHERE email = ?", (email.lower(),))
-    result = cursor.fetchone()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, password_hash, nickname, hsk_level FROM users WHERE email = ?", (email.lower(),))
+        result = cursor.fetchone()
 
-    if result and verify_password(password, result[1]):
-        # 更新最后登录时间
-        cursor.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(), result[0]))
-        conn.commit()
+        if result and verify_password(password, result[1]):
+            # 更新最后登录时间
+            cursor.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(), result[0]))
+            conn.commit()
+            conn.close()
+            return {"success": True, "user_id": result[0], "nickname": result[2], "hsk_level": result[3]}
+
         conn.close()
-        return {"success": True, "user_id": result[0], "nickname": result[2], "hsk_level": result[3]}
 
-    conn.close()
-    return {"success": False, "error": "邮箱或密码错误 Invalid email or password"}
+        # 如果没有找到用户，检查数据库是否有用户
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        conn.close()
+
+        if user_count == 0:
+            return {"success": False, "error": "数据库已重置，请重新注册 Database reset, please register again"}
+
+        return {"success": False, "error": "邮箱或密码错误 Invalid email or password"}
+    except Exception as e:
+        return {"success": False, "error": f"登录出错 Login error: {str(e)}"}
 
 def get_user_info(user_id):
     """获取用户信息"""
@@ -379,7 +393,7 @@ def get_deepseek_response(messages, role_name, scene, hsk_level):
 3. 回复简洁自然(1-3句话)
 
 输出JSON格式:
-{{"chinese": "中文回复", "pinyin": "拼音", "english": "英文翻译", "keywords": [{{"word": "生词", "meaning": "释义"}}], "suggestions": ["回复选项1", "回复选项2", "回复选项3"]}}
+{{"chinese": "中文回复", "pinyin": "拼音", "english": "英文翻译", "keywords": [{{"word": "生词", "meaning": "释义"}}], "suggestions": [{{"cn": "中文回复选项1", "en": "English option 1"}}, {{"cn": "中文回复选项2", "en": "English option 2"}}, {{"cn": "中文回复选项3", "en": "English option 3"}}]}}
 
 只返回JSON！"""
 
@@ -847,7 +861,13 @@ def render_auth():
                         st.error(f"❌ {result['error']}")
 
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: #999; font-size: 0.8rem;'>v1.2 · 数据安全存储 Secure Data Storage</p>", unsafe_allow_html=True)
+    st.markdown("""
+    <p style='text-align: center; color: #999; font-size: 0.75rem;'>
+    v1.2 · 内测版本 Beta Version<br>
+    ⚠️ 云端数据可能会重置，如遇登录问题请重新注册<br>
+    Cloud data may reset, please re-register if login fails
+    </p>
+    """, unsafe_allow_html=True)
 
 
 def render_landing():
@@ -990,8 +1010,17 @@ def render_chat():
         cols = st.columns(len(suggestions))
         for idx, sug in enumerate(suggestions):
             with cols[idx]:
-                if st.button(f"💬 {sug}", key=f"sug_{len(st.session_state.messages)}_{idx}", use_container_width=True):
-                    process_input(sug, role_name, scene, hsk_level)
+                # 支持新格式 {"cn": "中文", "en": "English"} 和旧格式 "中文"
+                if isinstance(sug, dict):
+                    cn_text = sug.get("cn", "")
+                    en_text = sug.get("en", "")
+                    button_label = f"💬 {cn_text}\n({en_text})" if en_text else f"💬 {cn_text}"
+                    if st.button(button_label, key=f"sug_{len(st.session_state.messages)}_{idx}", use_container_width=True):
+                        process_input(cn_text, role_name, scene, hsk_level)
+                else:
+                    # 兼容旧格式
+                    if st.button(f"💬 {sug}", key=f"sug_{len(st.session_state.messages)}_{idx}", use_container_width=True):
+                        process_input(sug, role_name, scene, hsk_level)
 
     # ============================================================
     # 输入区域 - 文字 + 语音
@@ -1115,7 +1144,7 @@ def render_ai_message(content, msg_index, role_name):
             st.rerun()
 
     if f"audio_{msg_index}" in st.session_state and st.session_state[f"audio_{msg_index}"]:
-        st.audio(st.session_state[f"audio_{msg_index}"], format="audio/mp3", autoplay=True)
+        st.audio(st.session_state[f"audio_{msg_index}"], format="audio/mp3", autoplay=False)
 
     if st.session_state.get(f"show_trans_{msg_index}", False):
         st.markdown(f'<div class="english-text">📝 {english}</div>', unsafe_allow_html=True)
